@@ -24,6 +24,7 @@ Academic Integrity Statement:
 import numpy as np
 import matplotlib.pyplot as plt
 import csv, os
+import time
 from pathlib import Path
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.model_selection import train_test_split
@@ -78,6 +79,90 @@ def build_synthetic_dataset(samples_per_class, sampling_rate, duration, noise_st
             labels.append(label)
     return np.array(signals), np.array(labels), t
 
+
+def extract_spectral_features(signals, sampling_rate):
+    """
+    Extract spectral features from all signals using fully vectorized
+    rFFT and frequency-band masking operations.
+    """
+
+    signals = np.asarray(signals)
+
+    if signals.ndim == 1:
+        signals = signals[np.newaxis, :]
+
+    n_points = signals.shape[1]
+    freqs = np.fft.rfftfreq(n_points, d=1 / sampling_rate) # Frequency bins corresponding to rFFT output
+    fft_vals = np.fft.rfft(signals, axis=1) # Perform rFFT across every signal simultaneously
+    power = np.abs(fft_vals) ** 2 # Power spectrum
+    total_power = np.sum(power, axis=1, keepdims=True) + 1e-12 # Prevent divide-by-zero
+
+    bands = {'delta':(0.5,4),'theta':(4,8),'alpha':(8,13),'beta':(13,30),'gamma':(30,60)} # standard EEG bands
+
+    band_masks = np.array([(freqs >= low) & (freqs <= high) for low, high in bands.values()]) # Build all frequency masks
+    band_power = np.stack([np.sum(power[:, mask], axis=1) for mask in band_masks], axis=1) # Calculate relative power for every signal and every band
+    relative_band_power = band_power / total_power
+
+    peak_indices = np.argmax(power, axis=1) # Dominant frequency
+    peak_freq = freqs[peak_indices]
+
+    spectral_centroid = (np.sum(power * freqs[np.newaxis, :], axis=1)/ total_power[:, 0]) # Spectral centroid
+
+    features = np.column_stack([relative_band_power, peak_freq, spectral_centroid])     # Combine features
+
+
+    return features
+
+# possible total vectorization implementation
+"""
+def extract_spectral_features(signals, sampling_rate):
+    
+    #Vectorized spectral feature extraction using rFFT and frequency-band masking.
+
+    signals = np.asarray(signals)
+
+    if signals.ndim == 1:
+        signals = signals[np.newaxis, :]
+
+    n_points = signals.shape[1]
+
+    freqs = np.fft.rfftfreq(n_points,d=1 / sampling_rate)
+
+    # Batch FFT across all signals
+    fft_values = np.fft.rfft(signals, axis=1)
+
+    # Power spectrum
+    power = np.abs(fft_values) ** 2
+
+    # Total power per signal
+    total_power = np.sum(power,axis=1,keepdims=True) + 1e-12
+
+    bands = np.array([[0.5, 4],[4, 8],[8, 13],[13, 30],[30, 60]])
+
+    # Shape: (num_bands, num_frequency_bins)
+    masks = (
+        (freqs[np.newaxis, :] >= bands[:, 0, np.newaxis])
+        &
+        (freqs[np.newaxis, :] <= bands[:, 1, np.newaxis])
+    )
+
+    # Matrix multiplication:
+    # (signals × frequencies) @ (frequencies × bands)
+    band_power = power @ masks.T
+
+    relative_power = band_power / total_power
+
+    peak_freq = freqs[np.argmax(power, axis=1)]
+
+    spectral_centroid = (power @ freqs) / total_power[:, 0]
+
+    features = np.column_stack([relative_power,peak_freq,spectral_centroid])
+
+    return features
+"""
+# previously using partial vectorization and partial python iteration
+
+"""
 def extract_spectral_features(signals, sampling_rate):
     n_points = signals.shape[1] # number of points in each signal
     freqs = np.fft.rfftfreq(n_points, 1/sampling_rate) # calculates the frequencies corresponding to the output of a real Fast Fourier Transform
@@ -93,6 +178,7 @@ def extract_spectral_features(signals, sampling_rate):
         features.append(band_rel + [peak_freq, centroid])
     
     return np.array(features) # return feature matrix
+"""
 
 def train_classifier(X, y, k=5):
     # imported function from sklearn to split dataset into training and testing sets
